@@ -10,61 +10,50 @@ Each kubeconfig requires a Kubernetes API Server to connect to. To support high 
 
 Generate a kubeconfig file suitable for authenticating as the `admin` user:
 
-```
-{
-  KUBERNETES_PUBLIC_ADDRESS=$(gcloud compute addresses describe kubernetes-the-hard-way \
-    --region $(gcloud config get-value compute/region) \
-    --format 'value(address)')
+```txt
+VIP=192.168.50.192
 
-  kubectl config set-cluster kubernetes-the-hard-way \
-    --certificate-authority=ca.pem \
-    --embed-certs=true \
-    --server=https://${KUBERNETES_PUBLIC_ADDRESS}:6443
+kubectl config set-cluster kubernetes-on-raspberrpi-the-hard-way \
+  --certificate-authority=ca.pem \
+  --embed-certs=true \
+  --server=https://${VIP}:8443
 
-  kubectl config set-credentials admin \
-    --client-certificate=admin.pem \
-    --client-key=admin-key.pem
+kubectl config set-credentials admin \
+  --client-certificate=admin.pem \
+  --client-key=admin-key.pem
 
-  kubectl config set-context kubernetes-the-hard-way \
-    --cluster=kubernetes-the-hard-way \
-    --user=admin
+kubectl config set-context kubernetes-on-raspberrpi-the-hard-way \
+  --cluster=kubernetes-on-raspberrpi-the-hard-way \
+  --user=admin
 
-  kubectl config use-context kubernetes-the-hard-way
-}
+kubectl config use-context kubernetes-on-raspberrpi-the-hard-way
 ```
 
 ## Verification
 
 Check the health of the remote Kubernetes cluster:
+  **TODO: update ComponentStatus to non-deprecated version**
 
-```
-kubectl get componentstatuses
-```
-
-> output
-
-```
+```txt
+$ kubectl get componentstatus
+Warning: v1 ComponentStatus is deprecated in v1.19+
 NAME                 STATUS    MESSAGE             ERROR
-scheduler            Healthy   ok
 controller-manager   Healthy   ok
+scheduler            Healthy   ok
 etcd-0               Healthy   {"health":"true"}
-etcd-1               Healthy   {"health":"true"}
 etcd-2               Healthy   {"health":"true"}
+etcd-1               Healthy   {"health":"true"}
 ```
 
 List the nodes in the remote Kubernetes cluster:
 
-```
-kubectl get nodes
-```
-
-> output
-
-```
-NAME       STATUS   ROLES    AGE     VERSION
-worker-0   Ready    <none>   2m30s   v1.18.6
-worker-1   Ready    <none>   2m30s   v1.18.6
-worker-2   Ready    <none>   2m30s   v1.18.6
+```txt$ kubectl get nodes
+NAME    STATUS   ROLES    AGE     VERSION
+rpi04   Ready    <none>   9m24s   v1.20.0
+rpi05   Ready    <none>   9m28s   v1.20.0
+rpi06   Ready    <none>   9m24s   v1.20.0
+rpi07   Ready    <none>   9m24s   v1.20.0
+rpi08   Ready    <none>   9m26s   v1.20.0
 ```
 
 Next: [Provisioning Pod Network Routes](11-pod-network-routes.md)

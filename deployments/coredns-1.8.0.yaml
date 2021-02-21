@@ -98,7 +98,7 @@ spec:
         beta.kubernetes.io/os: linux
       containers:
       - name: coredns
-        image: coredns/coredns:1.7.0
+        image: coredns/coredns:1.8.0
         imagePullPolicy: IfNotPresent
         resources:
           limits:
@@ -167,7 +167,7 @@ metadata:
 spec:
   selector:
     k8s-app: kube-dns
-  clusterIP: 10.32.0.10
+  clusterIP: 10.240.0.10
   ports:
   - name: dns
     port: 53

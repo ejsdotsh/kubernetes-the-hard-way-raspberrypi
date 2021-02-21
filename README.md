@@ -1,6 +1,6 @@
 # Kubernetes The Hard Way on RaspberryPi
 
-This tutorial walks you through setting up Kubernetes the hard way, on RaspberryPi. It is a fork of the incomprable [@KelseyHightower's](https://github.com/kelseyhightower) [Kubernetes The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way), heavily modified and/or rewritten to use RaspberyPi instead of GCP. This guide is not for people looking for a fully automated command to bring up a RaspberryPi Kubernetes cluster. If that's you, then check out [Rancher's K3s](https://rancher.com/docs/k3s/latest/en/), or the [Getting Started Guides](https://kubernetes.io/docs/setup).
+This tutorial walks you through setting up Kubernetes the hard way, on RaspberryPi. It is a fork of the incomprable [@KelseyHightower's](https://github.com/kelseyhightower) [Kubernetes The Hard Way](https://github.com/kelseyhightower/kubernetes-the-hard-way), heavily modified to use on RaspberyPi. This guide is not for people looking for a fully automated command to bring up a RaspberryPi Kubernetes cluster. If that's you, then check out [Rancher's K3s](https://rancher.com/docs/k3s/latest/en/), or the [Getting Started Guides](https://kubernetes.io/docs/setup).
 
 Kubernetes The Hard Way on RaspberryPi is optimized for learning, which means taking the long route to ensure you understand each task required to bootstrap a RaspberryPi Kubernetes cluster.
 

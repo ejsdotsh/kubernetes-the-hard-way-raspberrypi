@@ -1,13 +1,13 @@
 # Bootstrapping the Kubernetes Control Plane
 
-In this lab you will bootstrap the Kubernetes control plane across three compute instances and configure it for high availability. You will also create an external load balancer that exposes the Kubernetes API Servers to remote clients. The following components will be installed on each node: Kubernetes API Server, Scheduler, and Controller Manager.
+In this lab you will bootstrap the Kubernetes control plane across three RaspberryPi and configure it for high availability. You will also create an *external* load balancer that balances connections to the Kubernetes API Servers from remote clients. The following components will be installed on each node: Kubernetes API Server, Scheduler, and Controller Manager.
 
 ## Prerequisites
 
-The commands in this lab must be run on each controller instance: `controller-0`, `controller-1`, and `controller-2`. Login to each controller instance using the `gcloud` command. Example:
+The commands in this lab must be run on each controller instance: `rpi01`, `rpi02`, and `rpi03`. Login to each controller instance using ssh. Example:
 
-```
-gcloud compute ssh controller-0
+```txt
+ssh rpi01
 ```
 
 ### Running commands in parallel with tmux
@@ -18,53 +18,44 @@ gcloud compute ssh controller-0
 
 Create the Kubernetes configuration directory:
 
-```
+```txt
 sudo mkdir -p /etc/kubernetes/config
 ```
 
 ### Download and Install the Kubernetes Controller Binaries
 
-Download the official Kubernetes release binaries:
+Download the official Kubernetes release binaries (the *server* package has what we want):
 
-```
-wget -q --show-progress --https-only --timestamping \
-  "https://storage.googleapis.com/kubernetes-release/release/v1.18.6/bin/linux/amd64/kube-apiserver" \
-  "https://storage.googleapis.com/kubernetes-release/release/v1.18.6/bin/linux/amd64/kube-controller-manager" \
-  "https://storage.googleapis.com/kubernetes-release/release/v1.18.6/bin/linux/amd64/kube-scheduler" \
-  "https://storage.googleapis.com/kubernetes-release/release/v1.18.6/bin/linux/amd64/kubectl"
+```txt
+wget -q --show-progress --https-only --timestamping "https://dl.k8s.io/v1.20.0/kubernetes-server-linux-arm64.tar.gz"
 ```
 
 Install the Kubernetes binaries:
 
-```
-{
-  chmod +x kube-apiserver kube-controller-manager kube-scheduler kubectl
-  sudo mv kube-apiserver kube-controller-manager kube-scheduler kubectl /usr/local/bin/
-}
+```txt
+tar -zxf kubernetes-server-linux-arm64.tar.gz
+sudo mv kubernetes/server/bin/{kube-apiserver,kube-controller-manager,kube-scheduler,kubectl} /usr/local/bin/
 ```
 
 ### Configure the Kubernetes API Server
 
-```
-{
-  sudo mkdir -p /var/lib/kubernetes/
+```txt
+sudo mkdir -p /var/lib/kubernetes/
 
-  sudo mv ca.pem ca-key.pem kubernetes-key.pem kubernetes.pem \
-    service-account-key.pem service-account.pem \
+sudo mv ca.pem ca-key.pem kubernetes-key.pem kubernetes.pem \
+  service-account-key.pem service-account.pem \
     encryption-config.yaml /var/lib/kubernetes/
-}
 ```
 
 The instance internal IP address will be used to advertise the API Server to members of the cluster. Retrieve the internal IP address for the current compute instance:
 
-```
-INTERNAL_IP=$(curl -s -H "Metadata-Flavor: Google" \
-  http://metadata.google.internal/computeMetadata/v1/instance/network-interfaces/0/ip)
+```txt
+INTERNAL_IP=$(host $(hostname -s).octopik3s.io | awk '{print $4}')
 ```
 
 Create the `kube-apiserver.service` systemd unit file:
 
-```
+```txt
 cat <<EOF | sudo tee /etc/systemd/system/kube-apiserver.service
 [Unit]
 Description=Kubernetes API Server
@@ -86,7 +77,7 @@ ExecStart=/usr/local/bin/kube-apiserver \\
   --etcd-cafile=/var/lib/kubernetes/ca.pem \\
   --etcd-certfile=/var/lib/kubernetes/kubernetes.pem \\
   --etcd-keyfile=/var/lib/kubernetes/kubernetes-key.pem \\
-  --etcd-servers=https://10.240.0.10:2379,https://10.240.0.11:2379,https://10.240.0.12:2379 \\
+  --etcd-servers=https://192.168.50.193:2379,https://192.168.50.194:2379,https://192.168.50.195:2379 \\
   --event-ttl=1h \\
   --encryption-provider-config=/var/lib/kubernetes/encryption-config.yaml \\
   --kubelet-certificate-authority=/var/lib/kubernetes/ca.pem \\
@@ -94,8 +85,10 @@ ExecStart=/usr/local/bin/kube-apiserver \\
   --kubelet-client-key=/var/lib/kubernetes/kubernetes-key.pem \\
   --kubelet-https=true \\
   --runtime-config='api/all=true' \\
+  --service-account-issuer=api \\
+  --service-account-signing-key-file=/var/lib/kubernetes/service-account-key.pem \\
   --service-account-key-file=/var/lib/kubernetes/service-account.pem \\
-  --service-cluster-ip-range=10.32.0.0/24 \\
+  --service-cluster-ip-range=10.240.0.0/24 \\
   --service-node-port-range=30000-32767 \\
   --tls-cert-file=/var/lib/kubernetes/kubernetes.pem \\
   --tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \\
@@ -112,13 +105,13 @@ EOF
 
 Move the `kube-controller-manager` kubeconfig into place:
 
-```
+```txt
 sudo mv kube-controller-manager.kubeconfig /var/lib/kubernetes/
 ```
 
 Create the `kube-controller-manager.service` systemd unit file:
 
-```
+```txt
 cat <<EOF | sudo tee /etc/systemd/system/kube-controller-manager.service
 [Unit]
 Description=Kubernetes Controller Manager
@@ -135,7 +128,7 @@ ExecStart=/usr/local/bin/kube-controller-manager \\
   --leader-elect=true \\
   --root-ca-file=/var/lib/kubernetes/ca.pem \\
   --service-account-private-key-file=/var/lib/kubernetes/service-account-key.pem \\
-  --service-cluster-ip-range=10.32.0.0/24 \\
+  --service-cluster-ip-range=10.240.0.0/24 \\
   --use-service-account-credentials=true \\
   --v=2
 Restart=on-failure
@@ -150,15 +143,16 @@ EOF
 
 Move the `kube-scheduler` kubeconfig into place:
 
-```
+```txt
 sudo mv kube-scheduler.kubeconfig /var/lib/kubernetes/
 ```
 
 Create the `kube-scheduler.yaml` configuration file:
+*note*: the apiVersion for kubescheduler must be updated to `v1beta1`, this will be going away in 1.23
 
-```
+```txt
 cat <<EOF | sudo tee /etc/kubernetes/config/kube-scheduler.yaml
-apiVersion: kubescheduler.config.k8s.io/v1alpha1
+apiVersion: kubescheduler.config.k8s.io/v1beta1
 kind: KubeSchedulerConfiguration
 clientConnection:
   kubeconfig: "/var/lib/kubernetes/kube-scheduler.kubeconfig"
@@ -169,7 +163,7 @@ EOF
 
 Create the `kube-scheduler.service` systemd unit file:
 
-```
+```txt
 cat <<EOF | sudo tee /etc/systemd/system/kube-scheduler.service
 [Unit]
 Description=Kubernetes Scheduler
@@ -177,6 +171,7 @@ Documentation=https://github.com/kubernetes/kubernetes
 
 [Service]
 ExecStart=/usr/local/bin/kube-scheduler \\
+  --leader-elect=true \\
   --config=/etc/kubernetes/config/kube-scheduler.yaml \\
   --v=2
 Restart=on-failure
@@ -189,95 +184,32 @@ EOF
 
 ### Start the Controller Services
 
-```
-{
-  sudo systemctl daemon-reload
-  sudo systemctl enable kube-apiserver kube-controller-manager kube-scheduler
-  sudo systemctl start kube-apiserver kube-controller-manager kube-scheduler
-}
+```txt
+sudo systemctl daemon-reload
+sudo systemctl enable kube-apiserver kube-controller-manager kube-scheduler
+sudo systemctl start kube-apiserver kube-controller-manager kube-scheduler
 ```
 
 > Allow up to 10 seconds for the Kubernetes API Server to fully initialize.
 
 ### Enable HTTP Health Checks
 
-A [Google Network Load Balancer](https://cloud.google.com/compute/docs/load-balancing/network) will be used to distribute traffic across the three API servers and allow each API server to terminate TLS connections and validate client certificates. The network load balancer only supports HTTP health checks which means the HTTPS endpoint exposed by the API server cannot be used. As a workaround the nginx webserver can be used to proxy HTTP health checks. In this section nginx will be installed and configured to accept HTTP health checks on port `80` and proxy the connections to the API server on `https://127.0.0.1:6443/healthz`.
-
-> The `/healthz` API server endpoint does not require authentication by default.
-
-Install a basic web server to handle HTTP health checks:
-
-```
-sudo apt-get update
-sudo apt-get install -y nginx
-```
-
-```
-cat > kubernetes.default.svc.cluster.local <<EOF
-server {
-  listen      80;
-  server_name kubernetes.default.svc.cluster.local;
-
-  location /healthz {
-     proxy_pass                    https://127.0.0.1:6443/healthz;
-     proxy_ssl_trusted_certificate /var/lib/kubernetes/ca.pem;
-  }
-}
-EOF
-```
-
-```
-{
-  sudo mv kubernetes.default.svc.cluster.local \
-    /etc/nginx/sites-available/kubernetes.default.svc.cluster.local
-
-  sudo ln -s /etc/nginx/sites-available/kubernetes.default.svc.cluster.local /etc/nginx/sites-enabled/
-}
-```
-
-```
-sudo systemctl restart nginx
-```
-
-```
-sudo systemctl enable nginx
-```
 
 ### Verification
 
-```
-kubectl get componentstatuses --kubeconfig admin.kubeconfig
-```
+On each controller:
 
-```
+```txt
+$ kubectl get componentstatuses --kubeconfig admin.kubeconfig
+
+Warning: v1 ComponentStatus is deprecated in v1.19+
 NAME                 STATUS    MESSAGE             ERROR
-scheduler            Healthy   ok
 controller-manager   Healthy   ok
-etcd-0               Healthy   {"health":"true"}
+scheduler            Healthy   ok
 etcd-1               Healthy   {"health":"true"}
 etcd-2               Healthy   {"health":"true"}
+etcd-0               Healthy   {"health":"true"}
 ```
-
-Test the nginx HTTP health check proxy:
-
-```
-curl -H "Host: kubernetes.default.svc.cluster.local" -i http://127.0.0.1/healthz
-```
-
-```
-HTTP/1.1 200 OK
-Server: nginx/1.18.0 (Ubuntu)
-Date: Sat, 18 Jul 2020 06:20:48 GMT
-Content-Type: text/plain; charset=utf-8
-Content-Length: 2
-Connection: keep-alive
-Cache-Control: no-cache, private
-X-Content-Type-Options: nosniff
-
-ok
-```
-
-> Remember to run the above commands on each controller node: `controller-0`, `controller-1`, and `controller-2`.
 
 ## RBAC for Kubelet Authorization
 
@@ -287,15 +219,16 @@ In this section you will configure RBAC permissions to allow the Kubernetes API 
 
 The commands in this section will effect the entire cluster and only need to be run once from one of the controller nodes.
 
-```
-gcloud compute ssh controller-0
+```txt
+ssh rpi01
 ```
 
 Create the `system:kube-apiserver-to-kubelet` [ClusterRole](https://kubernetes.io/docs/admin/authorization/rbac/#role-and-clusterrole) with permissions to access the Kubelet API and perform most common tasks associated with managing pods:
+*apiVersion has been updated to v1*
 
-```
+```txt
 cat <<EOF | kubectl apply --kubeconfig admin.kubeconfig -f -
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   annotations:
@@ -321,9 +254,9 @@ The Kubernetes API Server authenticates to the Kubelet as the `kubernetes` user 
 
 Bind the `system:kube-apiserver-to-kubelet` ClusterRole to the `kubernetes` user:
 
-```
+```txt
 cat <<EOF | kubectl apply --kubeconfig admin.kubeconfig -f -
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: system:kube-apiserver
@@ -341,76 +274,107 @@ EOF
 
 ## The Kubernetes Frontend Load Balancer
 
-In this section you will provision an external load balancer to front the Kubernetes API Servers. The `kubernetes-the-hard-way` static IP address will be attached to the resulting load balancer.
+In this section you will install and configure a load balancer to front the Kubernetes API Servers. The `VIP` address will be served by each of the controllers in a round-robin manner.
 
-> The compute instances created in this tutorial will not have permission to complete this section. **Run the following commands from the same machine used to create the compute instances**.
+### Provision a Software Load Balancer
 
+A combination of [keepalived](https://www.keepalived.org/) and [haproxy](http://www.haproxy.org/) are used to distribute traffic across the three API servers and allow each API server to terminate TLS connections and validate client certificates.
 
-### Provision a Network Load Balancer
+Generate `keepalived.conf`
 
-Create the external load balancer network resources:
+```txt
+VRRP_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 24 | head -n 1)
 
-```
-{
-  KUBERNETES_PUBLIC_ADDRESS=$(gcloud compute addresses describe kubernetes-the-hard-way \
-    --region $(gcloud config get-value compute/region) \
-    --format 'value(address)')
-
-  gcloud compute http-health-checks create kubernetes \
-    --description "Kubernetes Health Check" \
-    --host "kubernetes.default.svc.cluster.local" \
-    --request-path "/healthz"
-
-  gcloud compute firewall-rules create kubernetes-the-hard-way-allow-health-check \
-    --network kubernetes-the-hard-way \
-    --source-ranges 209.85.152.0/22,209.85.204.0/22,35.191.0.0/16 \
-    --allow tcp
-
-  gcloud compute target-pools create kubernetes-target-pool \
-    --http-health-check kubernetes
-
-  gcloud compute target-pools add-instances kubernetes-target-pool \
-   --instances controller-0,controller-1,controller-2
-
-  gcloud compute forwarding-rules create kubernetes-forwarding-rule \
-    --address ${KUBERNETES_PUBLIC_ADDRESS} \
-    --ports 6443 \
-    --region $(gcloud config get-value compute/region) \
-    --target-pool kubernetes-target-pool
+cat > keepalived.conf <<EOF
+vrrp_instance VI_1 {
+    state BACKUP
+    priority 100
+    interface eth0
+    virtual_router_id 42
+    advert_int 1
+    nopreempt
+    authentication {
+        auth_type AH
+        auth_pass ${VRRP_KEY}
+    }
+    virtual_ipaddress {
+        192.168.50.192
+    }
 }
+EOF
 ```
 
-### Verification
+Copy to controllers
 
-> The compute instances created in this tutorial will not have permission to complete this section. **Run the following commands from the same machine used to create the compute instances**.
+`for pi in rpi01 rpi02 rpi03 ; do scp keepalived.conf ${pi}: ; done`
 
-Retrieve the `kubernetes-the-hard-way` static IP address:
+on each of the controller nodes
 
-```
-KUBERNETES_PUBLIC_ADDRESS=$(gcloud compute addresses describe kubernetes-the-hard-way \
-  --region $(gcloud config get-value compute/region) \
-  --format 'value(address)')
-```
-
-Make a HTTP request for the Kubernetes version info:
-
-```
-curl --cacert ca.pem https://${KUBERNETES_PUBLIC_ADDRESS}:6443/version
+```txt
+sudo apt-get update && sudo apt-get -y install keepalived haproxy
+sudo mkdir -p /etc/keepalived
+sudo mv keepalived.conf /etc/keepalived/
 ```
 
-> output
+append the following to `/etc/haproxy/haproxy.cfg`
 
+```txt
+sudo vi /etc/haproxy/haproxy.cfg
+
+
+frontend stats
+  bind *:8080
+  mode http
+  stats uri /haproxy?stats
+
+frontend kubernetes-rpi
+  bind 192.168.50.192:8443
+  bind 127.0.0.1:8443
+  mode tcp
+  option tcplog
+  timeout client 4h
+  default_backend kubernetes-rpi
+
+backend kubernetes-rpi
+  option httpchk GET /healthz
+  http-check expect status 200
+  mode tcp
+  option ssl-hello-chk
+  timeout server 4h
+  balance roundrobin
+  server kubernetes-rpi01 192.168.50.193:6443 check
+  server kubernetes-rpi02 192.168.50.194:6443 check
+  server kubernetes-rpi03 192.168.50.195:6443 check
 ```
+
+start the services
+
+```txt
+sudo systemctl daemon-reload
+sudo systemctl enable keepalived haproxy
+sudo systemctl start keeplived haproxy
+```
+
+Stats of the [HAProxy VIP](http://192.168.50.192:8080/haproxy?stats)
+
+![HAProxy stats](images/haproxy-status.png)
+
+Make an HTTPS request to the VIP for the Kubernetes version info:
+
+```txt
+VIP=192.168.50.192
+
+$ curl --cacert ca.pem https://${VIP}:8443/version
 {
   "major": "1",
-  "minor": "18",
-  "gitVersion": "v1.18.6",
-  "gitCommit": "dff82dc0de47299ab66c83c626e08b245ab19037",
+  "minor": "20",
+  "gitVersion": "v1.20.0",
+  "gitCommit": "af46c47ce925f4c4ad5cc8d1fca46c7b77d13b38",
   "gitTreeState": "clean",
-  "buildDate": "2020-07-15T16:51:04Z",
-  "goVersion": "go1.13.9",
+  "buildDate": "2020-12-08T17:51:19Z",
+  "goVersion": "go1.15.5",
   "compiler": "gc",
-  "platform": "linux/amd64"
+  "platform": "linux/arm64"
 }
 ```
 
